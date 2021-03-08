@@ -1,4 +1,4 @@
-FROM docker.io/library/php:7.4.15-fpm
+FROM docker.io/library/php:7.4.16-fpm
 
 RUN dpkg-query -f '${Package}\n' -W | grep -e '-dev$' > /tmp/dev-packages.prev \
     && apt update \
