@@ -1,7 +1,8 @@
 #!/bin/bash
 
-IMAGE=docker.io/orrisroot/php
-VERSION=7.4.22
+IMAGE=orrisroot/php
+REGISTORY=docker.io/${IMAGE}
+VERSION=7.4.23
 
 # 7.4-fpm
 pushd 7.4/fpm
