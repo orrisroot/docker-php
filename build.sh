@@ -2,7 +2,7 @@
 
 IMAGE=orrisroot/php
 REGISTORY=docker.io/${IMAGE}
-VERSION=7.4.24
+VERSION=7.4.25
 
 # 7.4-fpm
 pushd 7.4/fpm
