@@ -2,8 +2,13 @@
 
 IMAGE=orrisroot/php
 REGISTORY=docker.io/${IMAGE}
+VERSIONS=("7.4" "8.0" "8.1")
+FLAVORS=("apache" "fpm")
 
-function build_image () {
+VERSION=$1
+FLAVOR=$2
+
+build_image () {
   IMAGE=$1
   VERSION=$2
   TYPE=$3
@@ -16,21 +21,27 @@ function build_image () {
   popd
 }
 
+usage () {
+  echo "Usage: $(basename $1) VERSION FLAVOR"
+  echo "options:"
+  echo "  - VERSION: 7.4, 8.0, 8.1"
+  echo "  - FLAVOR:  apache, fpm"
+}
+
 cd $(dirname $0)
 
-# 7.4-apache
-build_image ${IMAGE} 7.4 apache
+if ! (printf '%s\n' "${VERSIONS[@]}" | grep -qx "${VERSION}"); then
+  usage $0
+  exit 1
+fi
+if ! (printf '%s\n' "${FLAVORS[@]}" | grep -qx "${FLAVOR}"); then
+  usage $0
+  exit 1
+fi
 
-# 7.4-fpm
-build_image ${IMAGE} 7.4 fpm
+build_image ${IMAGE} ${VERSION} ${FLAVOR}
 
-# 8.0-apache
-build_image ${IMAGE} 8.0 apache
-
-# 8.0-fpm
-build_image ${IMAGE} 8.0 fpm
-
-#docker login
 echo Done! To push built images, run the following command.
+echo docker login
 echo docker image push --all-tags ${IMAGE}
 
