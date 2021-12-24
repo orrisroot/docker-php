@@ -9,23 +9,22 @@ VERSION=$1
 FLAVOR=$2
 
 build_image () {
-  IMAGE=$1
-  VERSION=$2
-  TYPE=$3
-  TAG="${VERSION}-${TYPE}"
-  pushd ${VERSION}/${TYPE}
+  local TAG="${VERSION}-${FLAVOR}"
+  pushd ${VERSION}/${FLAVOR}
   docker build --pull --force-rm -t ${IMAGE}:${TAG} .
-  IMAGE_ID=$(docker image ls ${IMAGE}:${TAG} -q)
-  VERSION_=$(docker run --rm -it ${IMAGE}:${TAG} php -r "echo phpversion();")
-  docker image tag ${IMAGE_ID} ${IMAGE}:${VERSION_}-${TYPE}
+  local IMAGE_ID=$(docker image ls ${IMAGE}:${TAG} -q)
+  local VERSION_=$(docker run --rm -it ${IMAGE}:${TAG} php -r "echo phpversion();")
+  docker image tag ${IMAGE_ID} ${IMAGE}:${VERSION_}-${FLAVOR}
   popd
 }
 
 usage () {
   echo "Usage: $(basename $1) VERSION FLAVOR"
   echo "options:"
-  echo "  - VERSION: 7.4, 8.0, 8.1"
-  echo "  - FLAVOR:  apache, fpm"
+  echo -n "  - VERSION: "
+  echo "${VERSIONS[*]}" | sed -e 's/ /, /g'
+  echo -n "  - FLAVOR:  "
+  echo "${FLAVORS[*]}" | sed -e 's/ /, /g'
 }
 
 cd $(dirname $0)
