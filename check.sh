@@ -37,11 +37,17 @@ check_image () {
     return 0
 }
 
+RETVAL=0
 for VERSION in "${VERSIONS[@]}"; do
     for FLAVOR in "${FLAVORS[@]}"; do
         TAG="${VERSION}-${FLAVOR}"
 	BASE_IMAGE="${BASE_REPO}:${TAG}"
 	TARGET_IMAGE="${TARGET_REPO}:${TAG}"
 	check_image "${BASE_IMAGE}" "${TARGET_IMAGE}"
+	if [ $? -ne 0 ]; then
+		RETVAL=$?
+	fi
     done
 done
+
+exit $RETVAL
