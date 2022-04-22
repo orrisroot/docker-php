@@ -26,11 +26,10 @@ check_image () {
     local FOUND_LAYER_ID=$(echo ${TARGET_JSON} | jq ".Layers[] | select(. == ${BASE_LAYER_ID})")
 
     if [ "${BASE_LAYER_ID}" != "${FOUND_LAYER_ID}" ]; then
-        echo "The base Docker image has been updated."
-        echo "- ${BASE_CONTAINER}"
-        echo "The inherited Docker image needs to be updated."
+        echo "The Docker image needs to be updated."
         echo "- ${TARGET_CONTAINER}"
-        echo ""
+        echo "  |- ${BASE_CONTAINER}  [newer version found]"
+	echo ""
         return 1
     fi
 
