@@ -13,7 +13,7 @@ build_image () {
   pushd ${VERSION}/${FLAVOR}
   docker build --pull --force-rm -t ${IMAGE}:${TAG} .
   local IMAGE_ID=$(docker image ls ${IMAGE}:${TAG} -q)
-  local VERSION_=$(docker run --rm -it ${IMAGE}:${TAG} php -r "echo phpversion();")
+  local VERSION_=$(docker run --rm -t ${IMAGE}:${TAG} php -r "echo phpversion();")
   docker image tag ${IMAGE_ID} ${IMAGE}:${VERSION_}-${FLAVOR}
   popd
 }
