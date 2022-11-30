@@ -3,7 +3,7 @@
 BASE_REPO="docker.io/library/php"
 TARGET_REPO="docker.io/orrisroot/php"
 
-VERSIONS=("7.4" "8.0" "8.1")
+VERSIONS=("8.0" "8.1")
 FLAVORS=("apache" "fpm")
 
 REQUIRED_COMMANDS=("skopeo" "jq" "basename")

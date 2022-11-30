@@ -2,7 +2,7 @@
 
 IMAGE=orrisroot/php
 REGISTORY=docker.io/${IMAGE}
-VERSIONS=("7.4" "8.0" "8.1")
+VERSIONS=("8.0" "8.1")
 FLAVORS=("apache" "fpm")
 
 VERSION=$1
