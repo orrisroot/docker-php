@@ -11,7 +11,7 @@ cd $(dirname $0)
 
 for VERSION in "${VERSIONS[@]}"; do
   for FLAVOR in "${FLAVORS[@]}"; do
-    ./build.sh ${VERSION} ${FLAVOR} > logs/${VERSION}-${FLAVOR}.log &
+    ./build.sh ${VERSION} ${FLAVOR} > logs/${VERSION}-${FLAVOR}.log 2>&1 &
   done
 done
 
