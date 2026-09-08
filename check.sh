@@ -16,14 +16,22 @@ for COMMAND in "${REQUIRED_COMMANDS[@]}"; do
 done
 
 SKOPEO_OPTS="--retry-times 3 --retry-delay 30s"
-if [ -f "${HOME}/.docker/config.json" ] \
-    && jq -e '.auths["https://index.docker.io/v1/"]' "${HOME}/.docker/config.json" > /dev/null 2>&1; then
-    AUTHFILE=$(mktemp)
-    jq '{auths: {"https://index.docker.io/v1/": .auths["https://index.docker.io/v1/"]}}' \
-        "${HOME}/.docker/config.json" > "${AUTHFILE}"
-    SKOPEO_OPTS="--authfile ${AUTHFILE} ${SKOPEO_OPTS}"
-    trap "rm -f ${AUTHFILE}" EXIT
-fi
+AUTH_FILES=(
+    "${XDG_RUNTIME_DIR}/containers/auth.json"
+    "${HOME}/.config/containers/auth.json"
+    "${HOME}/.docker/config.json"
+)
+for AUTH_FILE in "${AUTH_FILES[@]}"; do
+    if [ -f "${AUTH_FILE}" ] \
+        && jq -e '.auths["https://index.docker.io/v1/"]' "${AUTH_FILE}" > /dev/null 2>&1; then
+        AUTHFILE=$(mktemp)
+        jq '{auths: {"https://index.docker.io/v1/": .auths["https://index.docker.io/v1/"]}}' \
+            "${AUTH_FILE}" > "${AUTHFILE}"
+        SKOPEO_OPTS="--authfile ${AUTHFILE} ${SKOPEO_OPTS}"
+        trap "rm -f ${AUTHFILE}" EXIT
+        break
+    fi
+done
 
 check_image () {
     local BASE_CONTAINER=$1

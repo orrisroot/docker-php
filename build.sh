@@ -2,6 +2,7 @@
 
 IMAGE=orrisroot/php
 REGISTORY=docker.io/${IMAGE}
+ENGINE=${ENGINE:-podman}
 VERSIONS=("8.2" "8.3" "8.4")
 FLAVORS=("apache" "fpm")
 
@@ -11,10 +12,10 @@ FLAVOR=$2
 build_image () {
   local TAG="${VERSION}-${FLAVOR}"
   pushd ${VERSION}/${FLAVOR}
-  docker build --pull --force-rm --progress=plain -t ${IMAGE}:${TAG} .
-  local IMAGE_ID=$(docker image ls ${IMAGE}:${TAG} -q)
-  local VERSION_=$(docker run --rm -t ${IMAGE}:${TAG} php -r "echo phpversion();")
-  docker image tag ${IMAGE_ID} ${IMAGE}:${VERSION_}-${FLAVOR}
+  ${ENGINE} build --pull --force-rm --progress=plain -t ${REGISTORY}:${TAG} .
+  local IMAGE_ID=$(${ENGINE} images ${REGISTORY}:${TAG} -q)
+  local VERSION_=$(${ENGINE} run --rm -t ${REGISTORY}:${TAG} php -r "echo phpversion();")
+  ${ENGINE} tag ${IMAGE_ID} ${REGISTORY}:${VERSION_}-${FLAVOR}
   popd
 }
 
@@ -29,6 +30,11 @@ usage () {
 
 cd $(dirname $0)
 
+if [ "${ENGINE}" != "podman" ] && [ "${ENGINE}" != "docker" ]; then
+  echo "Error: ENGINE must be podman or docker (got '${ENGINE}')." 1>&2
+  exit 2
+fi
+
 if ! (printf '%s\n' "${VERSIONS[@]}" | grep -qx "${VERSION}"); then
   usage $0
   exit 1
@@ -41,6 +47,10 @@ fi
 build_image ${IMAGE} ${VERSION} ${FLAVOR}
 
 echo Done! To push built images, run the following command.
-echo docker login
-echo docker image push --all-tags ${IMAGE}
+echo ${ENGINE} login
+if [ "${ENGINE}" = "docker" ]; then
+  echo ${ENGINE} image push --all-tags ${REGISTORY}
+else
+  echo ${ENGINE} push ${REGISTORY}:${VERSION}-${FLAVOR}
+fi
 
