@@ -1,9 +1,11 @@
 #!/bin/bash
 
+set -e
+
 IMAGE=orrisroot/php
 REGISTORY=docker.io/${IMAGE}
 ENGINE=${ENGINE:-podman}
-VERSIONS=("8.2" "8.3" "8.4")
+VERSIONS=("8.2" "8.3" "8.4" "8.5")
 FLAVORS=("apache" "fpm")
 
 VERSION=$1
