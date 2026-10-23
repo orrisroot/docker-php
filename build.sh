@@ -29,7 +29,8 @@ check_rate_limit () {
   tmp=$(mktemp)
   trap "rm -f ${tmp}" EXIT
 
-  # Use credentials from the podman/docker auth files, if any.
+  # Try an authenticated token once; fall back to an anonymous token on
+  # any failure (retrying with bad credentials would waste the quota).
   token=""
   auth_entry=""
   if command -v jq > /dev/null 2>&1; then
@@ -49,7 +50,7 @@ check_rate_limit () {
     if [ "${code}" = "200" ]; then
       token=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "${tmp}")
     else
-      echo "Warning: Docker Hub credentials invalid (HTTP ${code}); falling back to the anonymous quota." >&2
+      echo "Warning: Docker Hub credentials rejected (HTTP ${code}); using the anonymous quota for the rate check." >&2
     fi
   fi
 

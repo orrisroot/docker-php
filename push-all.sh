@@ -8,6 +8,7 @@
 #   DRY_RUN=1         list tags without pushing
 #   FORCE=1           push even if the remote is newer
 #   SKIP_STALE_CHECK=1  don't compare with the remote
+#   SKIP_AUTH_CHECK=1   skip the credential pre-check
 # Requires: podman login docker.io  (or: docker login)
 
 set -e
@@ -40,6 +41,26 @@ if command -v skopeo > /dev/null 2>&1; then
     fi
   done
 fi
+
+# Reject stale credentials up front (don't burn the failed-login budget).
+check_auth () {
+  [ "${SKIP_AUTH_CHECK:-0}" = "1" ] && return 0
+  local login
+  login=$(${ENGINE} login --get-login docker.io 2>/dev/null) || login=""
+  if [ -z "${login}" ]; then
+    echo "Error: not logged in to Docker Hub as the push account." >&2
+    echo "Run: ${ENGINE} login docker.io" >&2
+    exit 1
+  fi
+  if [ -n "${AUTH_FILE}" ] && [ -f "${AUTH_FILE}" ]; then
+    if ! skopeo inspect --config ${SKOPEO_OPTS} \
+         "docker://${REGISTORY}:${TAGS[0]}" > /dev/null 2>&1; then
+      echo "Error: Docker Hub rejected the stored credentials (skopeo inspect failed)." >&2
+      echo "The token may be stale. Run: ${ENGINE} login docker.io" >&2
+      exit 1
+    fi
+  fi
+}
 
 # Collect local tags (8.x-{flavor} and 8.x.y-{flavor}).
 mapfile -t ALL_TAGS < <(
@@ -79,6 +100,8 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "(dry run - not pushing)"
   exit 0
 fi
+
+check_auth
 
 # Return 0 (skip) when the remote copy is newer than local, else 1 (push).
 need_push () {
