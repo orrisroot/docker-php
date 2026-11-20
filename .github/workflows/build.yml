@@ -1,0 +1,420 @@
+name: Build and push
+
+# Base image digest updates are detected by Renovate (see renovate.json).
+# Renovate opens a PR updating <version>/<flavor>/Dockerfile -> the PR is
+# build-checked and smoke-tested -> merged into main -> pushed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '[0-9]*/**'
+      - '.github/workflows/build.yml'
+  # Run on every PR (no paths filter) so that the required "build" check is always reported
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target to build (e.g. "8.4-apache", "8.4", or "all")'
+        required: false
+        default: 'all'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: docker.io/orrisroot/php
+
+jobs:
+  plan:
+    name: Plan builds
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.select.outputs.targets }}
+      has_targets: ${{ steps.select.outputs.has_targets }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Select targets
+        id: select
+        env:
+          INPUT_TARGET: ${{ inputs.target }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t all_targets < <(
+            find . -maxdepth 3 -mindepth 3 -path './[0-9]*/*/Dockerfile' \
+              | sed -E 's|^\./([^/]+)/([^/]+)/Dockerfile$|\1/\2|' \
+              | sort -V
+          )
+
+          if [[ "${#all_targets[@]}" -eq 0 ]]; then
+            echo "::error::No Dockerfiles found"
+            exit 1
+          fi
+
+          selected=()
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            filter="${INPUT_TARGET:-all}"
+            if [[ -z "$filter" || "$filter" == "all" ]]; then
+              selected=("${all_targets[@]}")
+            else
+              for t in "${all_targets[@]}"; do
+                if [[ "$t" == "$filter" || "${t/\//-}" == "$filter" || "${t%%/*}" == "$filter" ]]; then
+                  selected+=("$t")
+                fi
+              done
+              if [[ "${#selected[@]}" -eq 0 ]]; then
+                echo "::error::No targets matched input '$INPUT_TARGET' (available: ${all_targets[*]})"
+                exit 1
+              fi
+            fi
+          else
+            changed_files=""
+            build_all=false
+
+            if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+              if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null \
+                || ! git cat-file -e "${PR_HEAD_SHA}^{commit}" 2>/dev/null; then
+                echo "Could not resolve PR commits; building all targets"
+                build_all=true
+              else
+                changed_files=$(git diff --name-only "${PR_BASE_SHA}...${PR_HEAD_SHA}")
+              fi
+            elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+              if [[ -z "${PUSH_BEFORE_SHA:-}" ]] \
+                || [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]] \
+                || ! git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+                echo "No previous commit available; building all targets"
+                build_all=true
+              else
+                changed_files=$(git diff --name-only "${PUSH_BEFORE_SHA}" "${GITHUB_SHA}")
+              fi
+            else
+              build_all=true
+            fi
+
+            if [[ "$build_all" == "true" ]]; then
+              selected=("${all_targets[@]}")
+            else
+              echo "Changed files:"
+              if [[ -n "$changed_files" ]]; then
+                printf '%s\n' "$changed_files" | sed 's/^/  /'
+              else
+                echo "  (none)"
+              fi
+
+              if printf '%s\n' "$changed_files" | grep -qx '\.github/workflows/build\.yml'; then
+                echo "Workflow file changed; building all targets"
+                selected=("${all_targets[@]}")
+              else
+                for t in "${all_targets[@]}"; do
+                  if printf '%s\n' "$changed_files" | grep -q "^${t//./\\.}/"; then
+                    selected+=("$t")
+                  fi
+                done
+              fi
+            fi
+          fi
+
+          if [[ "${#selected[@]}" -eq 0 ]]; then
+            echo "targets=[]" >> "$GITHUB_OUTPUT"
+            echo "has_targets=false" >> "$GITHUB_OUTPUT"
+            echo "No image targets to build."
+          else
+            targets_json=$(
+              printf '%s\n' "${selected[@]}" \
+                | jq -R -s -c 'split("\n") | map(select(length > 0) | split("/") | {version: .[0], flavor: .[1]})'
+            )
+            echo "targets=${targets_json}" >> "$GITHUB_OUTPUT"
+            echo "has_targets=true" >> "$GITHUB_OUTPUT"
+            echo "Selected targets: ${targets_json}"
+          fi
+
+  build-image:
+    name: Build ${{ matrix.target.version }}-${{ matrix.target.flavor }}
+    needs: plan
+    if: needs.plan.outputs.has_targets == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.plan.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate Dockerfile base image
+        env:
+          VERSION: ${{ matrix.target.version }}
+          FLAVOR: ${{ matrix.target.flavor }}
+        run: |
+          dockerfile="${VERSION}/${FLAVOR}/Dockerfile"
+          from_line=$(grep -m1 '^FROM ' "$dockerfile" || true)
+          expected="^FROM docker\\.io/library/php:${VERSION//./\\.}-${FLAVOR}(@sha256:[0-9a-f]{64})?$"
+          if ! [[ "$from_line" =~ $expected ]]; then
+            echo "::error::Unexpected FROM line in $dockerfile: '$from_line' (expected $expected)"
+            exit 1
+          fi
+          echo "Base image matches target: $from_line"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ matrix.target.version }}/${{ matrix.target.flavor }}
+          platforms: linux/amd64
+          no-cache: true
+          load: true
+          tags: ${{ env.IMAGE }}:${{ matrix.target.version }}-${{ matrix.target.flavor }}
+
+      - name: Read PHP version and tag image
+        id: php
+        env:
+          VERSION: ${{ matrix.target.version }}
+          FLAVOR: ${{ matrix.target.flavor }}
+        run: |
+          base_tag="${VERSION}-${FLAVOR}"
+          full_version=$(docker run --rm "${IMAGE}:${base_tag}" php -r 'echo PHP_VERSION;')
+          version_regex="^${VERSION//./\\.}\\.[0-9]+$"
+          if ! [[ "$full_version" =~ $version_regex ]]; then
+            echo "::error::Unexpected PHP version '$full_version' for target ${base_tag}"
+            exit 1
+          fi
+          full_tag="${full_version}-${FLAVOR}"
+          docker image tag "${IMAGE}:${base_tag}" "${IMAGE}:${full_tag}"
+          echo "full_version=${full_version}" >> "$GITHUB_OUTPUT"
+          echo "base_tag=${base_tag}" >> "$GITHUB_OUTPUT"
+          echo "full_tag=${full_tag}" >> "$GITHUB_OUTPUT"
+          echo "Tagged ${IMAGE}:${base_tag} and ${IMAGE}:${full_tag}"
+
+      - name: Smoke test
+        env:
+          FLAVOR: ${{ matrix.target.flavor }}
+          FULL_VERSION: ${{ steps.php.outputs.full_version }}
+          TEST_IMAGE: ${{ env.IMAGE }}:${{ steps.php.outputs.full_tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/www"
+          cat <<'EOF' > "$RUNNER_TEMP/www/index.php"
+          <?php
+          header('Content-Type: text/plain');
+          $requiredExtensions = [
+              'apcu', 'bcmath', 'bz2', 'calendar', 'exif', 'gd', 'gettext', 'gmp',
+              'igbinary', 'imagick', 'intl', 'ldap', 'msgpack', 'mysqli', 'Zend OPcache',
+              'pcntl', 'pdo_mysql', 'pdo_pgsql', 'pgsql', 'redis', 'shmop', 'soap',
+              'sockets', 'sysvmsg', 'sysvsem', 'sysvshm', 'tidy', 'xdebug', 'xhprof',
+              'xsl', 'zip',
+          ];
+          $missing = array_values(array_filter(
+              $requiredExtensions,
+              static fn(string $ext): bool => !extension_loaded($ext)
+          ));
+          $gd = gd_info();
+          $gdFeatures = [
+              'FreeType Support', 'JPEG Support', 'XPM Support', 'WebP Support', 'AVIF Support',
+          ];
+          $missingGd = array_values(array_filter(
+              $gdFeatures,
+              static fn(string $feature): bool => empty($gd[$feature])
+          ));
+          $redisConstants = [
+              'Redis::SERIALIZER_IGBINARY', 'Redis::SERIALIZER_MSGPACK',
+              'Redis::COMPRESSION_LZF', 'Redis::COMPRESSION_ZSTD', 'Redis::COMPRESSION_LZ4',
+          ];
+          $missingRedis = array_values(array_filter(
+              $redisConstants,
+              static fn(string $const): bool => !defined($const)
+          ));
+          if ($missing !== [] || $missingGd !== [] || $missingRedis !== [] || !class_exists('Imagick')) {
+              http_response_code(500);
+              echo json_encode([
+                  'missing_extensions' => $missing,
+                  'missing_gd_features' => $missingGd,
+                  'missing_redis_constants' => $missingRedis,
+                  'imagick_class' => class_exists('Imagick'),
+              ], JSON_PRETTY_PRINT);
+              exit(1);
+          }
+          echo 'smoke-test-ok:' . PHP_VERSION;
+          EOF
+
+          cli_stderr="$RUNNER_TEMP/cli-stderr.txt"
+          docker run --rm "$TEST_IMAGE" php -d display_startup_errors=1 -v 2>"$cli_stderr"
+          if [[ -s "$cli_stderr" ]]; then
+            echo "::error::PHP startup emitted stderr output:"
+            cat "$cli_stderr"
+            exit 1
+          fi
+
+          cli_out=$(docker run --rm -v "$RUNNER_TEMP/www:/check:ro" "$TEST_IMAGE" php -d display_startup_errors=1 /check/index.php)
+          if [[ "$cli_out" != "smoke-test-ok:${FULL_VERSION}" ]]; then
+            echo "::error::CLI smoke test failed: '$cli_out'"
+            exit 1
+          fi
+          echo "CLI smoke test passed: $cli_out"
+
+          trap 'docker rm -f smoke-test >/dev/null 2>&1 || true' EXIT
+
+          if [[ "$FLAVOR" == "apache" ]]; then
+            docker run -d --name smoke-test -p 18080:80 \
+              -v "$RUNNER_TEMP/www:/var/www/html:ro" "$TEST_IMAGE"
+            for i in $(seq 1 30); do
+              if [[ "$(docker inspect -f '{{.State.Status}}' smoke-test 2>/dev/null || true)" == "exited" ]]; then
+                echo "::error::Apache container exited unexpectedly"
+                docker logs smoke-test || true
+                exit 1
+              fi
+              status=$(curl -sS -o "$RUNNER_TEMP/body.txt" -w '%{http_code}' http://127.0.0.1:18080/index.php || true)
+              if [[ "$status" == "200" ]]; then
+                body=$(cat "$RUNNER_TEMP/body.txt")
+                if [[ "$body" == "smoke-test-ok:${FULL_VERSION}" ]]; then
+                  echo "Apache smoke test passed: $body"
+                  exit 0
+                fi
+                echo "::error::Unexpected Apache response body: '$body'"
+                docker logs smoke-test || true
+                exit 1
+              elif [[ "$status" == "500" ]]; then
+                echo "::error::Apache smoke test returned HTTP 500:"
+                cat "$RUNNER_TEMP/body.txt" || true
+                docker logs smoke-test || true
+                exit 1
+              fi
+              sleep 1
+            done
+            echo "::error::Apache smoke test failed"
+            docker logs smoke-test || true
+            exit 1
+          elif [[ "$FLAVOR" == "fpm" ]]; then
+            docker run -d --name smoke-test -p 19000:9000 \
+              -v "$RUNNER_TEMP/www:/var/www/html:ro" "$TEST_IMAGE"
+            for i in $(seq 1 30); do
+              if [[ "$(docker inspect -f '{{.State.Status}}' smoke-test 2>/dev/null || true)" == "exited" ]]; then
+                echo "::error::FPM container exited unexpectedly"
+                docker logs smoke-test || true
+                exit 1
+              fi
+              if python3 - "$FULL_VERSION" <<'PY'
+          import socket
+          import struct
+          import sys
+
+          expected = f"smoke-test-ok:{sys.argv[1]}".encode()
+
+          def pack_record(rtype: int, content: bytes, req_id: int = 1) -> bytes:
+              return struct.pack("!BBHHBB", 1, rtype, req_id, len(content), 0, 0) + content
+
+          def encode_kv(k: bytes, v: bytes) -> bytes:
+              def enc_len(n: int) -> bytes:
+                  return bytes([n]) if n < 128 else struct.pack("!I", n | 0x80000000)
+              return enc_len(len(k)) + enc_len(len(v)) + k + v
+
+          def recv_exact(sock: socket.socket, n: int) -> bytes:
+              chunks = []
+              remaining = n
+              while remaining > 0:
+                  chunk = sock.recv(remaining)
+                  if not chunk:
+                      raise EOFError("unexpected EOF from FastCGI server")
+                  chunks.append(chunk)
+                  remaining -= len(chunk)
+              return b"".join(chunks)
+
+          params = b"".join([
+              encode_kv(b"SCRIPT_FILENAME", b"/var/www/html/index.php"),
+              encode_kv(b"REQUEST_METHOD", b"GET"),
+              encode_kv(b"QUERY_STRING", b""),
+              encode_kv(b"CONTENT_LENGTH", b"0"),
+          ])
+          payload = (
+              pack_record(1, struct.pack("!HB5x", 1, 0))
+              + pack_record(4, params)
+              + pack_record(4, b"")
+              + pack_record(5, b"")
+          )
+
+          with socket.create_connection(("127.0.0.1", 19000), timeout=5) as sock:
+              sock.sendall(payload)
+              stdout = bytearray()
+              stderr = bytearray()
+              while True:
+                  _, rtype, _, length, padding, _ = struct.unpack("!BBHHBB", recv_exact(sock, 8))
+                  data = recv_exact(sock, length) if length else b""
+                  if padding:
+                      recv_exact(sock, padding)
+                  if rtype == 6:
+                      stdout.extend(data)
+                  elif rtype == 7:
+                      stderr.extend(data)
+                  elif rtype == 3:
+                      break
+
+          if stderr:
+              print(f"FastCGI stderr: {stderr.decode(errors='replace')}", file=sys.stderr)
+              sys.exit(1)
+
+          sep = stdout.find(b"\r\n\r\n")
+          if sep < 0:
+              print(f"Invalid FastCGI response: {bytes(stdout)!r}", file=sys.stderr)
+              sys.exit(1)
+
+          body = bytes(stdout[sep + 4:])
+          if body != expected:
+              print(f"Unexpected body: {body!r} (expected {expected!r})", file=sys.stderr)
+              sys.exit(1)
+          PY
+              then
+                echo "FPM smoke test passed: smoke-test-ok:${FULL_VERSION}"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "::error::FPM smoke test failed"
+            docker logs smoke-test || true
+            exit 1
+          else
+            echo "::error::Unsupported flavor for smoke test: '$FLAVOR'"
+            exit 1
+          fi
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        if: github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        env:
+          BASE_TAG: ${{ steps.php.outputs.base_tag }}
+          FULL_TAG: ${{ steps.php.outputs.full_tag }}
+        run: |
+          docker image push "${IMAGE}:${BASE_TAG}"
+          docker image push "${IMAGE}:${FULL_TAG}"
+
+  build:
+    needs: [plan, build-image]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify build results
+        run: |
+          if [[ "${{ needs.plan.result }}" != "success" ]]; then
+            echo "::error::Plan job failed (${{ needs.plan.result }})"
+            exit 1
+          fi
+          if [[ "${{ needs.build-image.result }}" != "success" && "${{ needs.build-image.result }}" != "skipped" ]]; then
+            echo "::error::Image build failed (${{ needs.build-image.result }})"
+            exit 1
+          fi
+          echo "Build check passed (plan=${{ needs.plan.result }}, build-image=${{ needs.build-image.result }})"

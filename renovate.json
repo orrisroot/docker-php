@@ -1,0 +1,115 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "Asia/Tokyo",
+  "prHourlyLimit": 0,
+  "packageRules": [
+    {
+      "description": "Keep PHP minor versions fixed per directory (only track digest updates)",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Group PHP 8.2 base image digest updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchFileNames": [
+        "8.2/**"
+      ],
+      "groupName": "PHP 8.2 base images"
+    },
+    {
+      "description": "Group PHP 8.3 base image digest updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchFileNames": [
+        "8.3/**"
+      ],
+      "groupName": "PHP 8.3 base images"
+    },
+    {
+      "description": "Group PHP 8.4 base image digest updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchFileNames": [
+        "8.4/**"
+      ],
+      "groupName": "PHP 8.4 base images"
+    },
+    {
+      "description": "Group PHP 8.5 base image digest updates",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchFileNames": [
+        "8.5/**"
+      ],
+      "groupName": "PHP 8.5 base images"
+    },
+    {
+      "description": "Automerge base image digest updates once the PR build passes",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "pinDigest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Automerge GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pinDigest"
+      ],
+      "automerge": true
+    }
+  ]
+}

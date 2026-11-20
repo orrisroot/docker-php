@@ -1,3 +1,11 @@
 .git
+.github
+.gitignore
+.locks
+.state
+build-all.sh
 build.sh
+logs
+push-all.sh
 README.md
+renovate.json
