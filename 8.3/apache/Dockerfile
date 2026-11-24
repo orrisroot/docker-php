@@ -1,4 +1,4 @@
-FROM docker.io/library/php:8.3-apache@sha256:e520186957084dc0a5baaea83b2ef0c20b16e78c1de31b6fdb21dc1240cce42e
+FROM docker.io/library/php:8.3-apache@sha256:fb5e44981a84757b95cd29440f534509f42a9766382c8c83bfd404924a62379b
 
 RUN dpkg-query -f '${Package}\n' -W | grep -e '-dev$' > /tmp/dev-packages.prev \
     && apt update \
